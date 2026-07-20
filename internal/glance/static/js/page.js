@@ -810,6 +810,8 @@ function _applyWidgetUpdate(widgetId, html) {
 
 let _sseSource = null;
 let _sseIntentionallyClosed = false;
+let _sseRetryCount = 0;
+const _sseMaxRetries = 5;
 
 function _closeSSE() {
     if (_sseSource) {
@@ -824,6 +826,10 @@ function _initSSE() {
         return;
     }
 
+    _connectSSE();
+}
+
+function _connectSSE() {
     const url = `${pageData.baseURL}/api/sse/updates`;
     _sseSource = new EventSource(url, { withCredentials: true });
 
@@ -836,14 +842,39 @@ function _initSSE() {
         }
     });
 
+    _sseSource.onopen = () => {
+        _sseRetryCount = 0;
+    };
+
     _sseSource.onerror = () => {
         if (_sseIntentionallyClosed) {
             return;
         }
 
-        if (_sseSource.readyState === EventSource.CLOSED) {
-            window.location.reload();
+        // A transient network error keeps the browser retrying on its own
+        // (readyState stays CONNECTING) — we only land here once it's given
+        // up entirely, which in practice means a reconnect got back a hard
+        // failure (e.g. an expired session). Retry a few times ourselves
+        // with backoff first; only fall back to a full page reload if it's
+        // still failing after that, instead of reloading on the first blip.
+        if (_sseSource.readyState !== EventSource.CLOSED) {
+            return;
         }
+
+        _sseSource.close();
+        _sseRetryCount++;
+
+        if (_sseRetryCount > _sseMaxRetries) {
+            window.location.reload();
+            return;
+        }
+
+        const delay = Math.min(1000 * 2 ** _sseRetryCount, 30000);
+        setTimeout(() => {
+            if (!_sseIntentionallyClosed) {
+                _connectSSE();
+            }
+        }, delay);
     };
 }
 

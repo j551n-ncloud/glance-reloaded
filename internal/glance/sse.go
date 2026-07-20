@@ -60,10 +60,20 @@ func (a *application) handleSSEUpdates(w http.ResponseWriter, r *http.Request) {
 	a.sseRegisterClient(client)
 	defer a.sseUnregisterClient(client)
 
+	// Widgets with long cache durations can leave the connection silent for
+	// a long time, which some intermediaries (proxies, CDNs, NATs) treat as
+	// dead and close. A steady heartbeat keeps bytes flowing so it isn't
+	// mistaken for an idle connection and dropped.
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
 	for {
 		select {
 		case msg := <-client.ch:
 			fmt.Fprintf(w, "event: widget-update\ndata: %s\n\n", msg)
+			flusher.Flush()
+		case <-heartbeat.C:
+			fmt.Fprintf(w, ": heartbeat\n\n")
 			flusher.Flush()
 		case <-r.Context().Done():
 			return
