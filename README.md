@@ -1,10 +1,9 @@
 <p align="center"><img src="docs/logo.png"></p>
-<h1 align="center">Glance</h1>
+<h1 align="center">Glance Reloaded</h1>
 <p align="center">
   <a href="#installation">Install</a> •
   <a href="docs/configuration.md#configuring-glance">Configuration</a> •
-  <a href="https://discord.com/invite/7KQ7Xa9kJd">Discord</a> •
-  <a href="https://github.com/sponsors/glanceapp">Sponsor</a>
+  <a href="https://discord.com/invite/7KQ7Xa9kJd">Discord</a>
 </p>
 <p align="center">
   <a href="https://github.com/glanceapp/community-widgets">Community widgets</a> •
@@ -14,7 +13,32 @@
 
 <p align="center">A lightweight, highly customizable dashboard that displays<br> your feeds in a beautiful, streamlined interface</p>
 
+<p align="center"><em>A fork of <a href="https://github.com/glanceapp/glance">glanceapp/glance</a> — all credit for the original project goes to its authors and contributors. This fork adds live, server-pushed widget updates; everything else is unchanged.</em></p>
+
 ![](docs/images/readme-main-image.png)
+
+## What's different in this fork
+
+Upstream Glance only fetches widget data when a page is loaded (or manually
+refreshed) — nothing updates in the background. This fork adds an optional
+live-update channel: the server tracks which widgets have gone stale, re-fetches
+them on their normal schedule, and pushes the freshly rendered HTML straight to
+any open browser tab over `/api/sse/updates`. The changed widget is morphed into
+place in the DOM (via [Idiomorph](https://github.com/bigskysoftware/idiomorph)),
+so scroll position, open popovers, and focus are left alone.
+
+It's on by default and needs no configuration. To turn it off:
+
+```yaml
+server:
+  disable-dynamic-updates: true # disables it globally
+```
+
+```yaml
+pages:
+  - name: Home
+    dynamic-updates: false # disables it for just this page
+```
 
 ## Features
 ### Various widgets
@@ -34,7 +58,7 @@
 * Low memory usage
 * Few dependencies
 * Minimal vanilla JS
-* Single <20mb binary available for multiple OSs & architectures and just as small Docker container
+* Single <20mb binary, buildable for any OS/architecture Go supports, and just as small a Docker container
 * Uncached pages usually load within ~1s (depending on internet speed and number of widgets)
 
 ### Tons of customizability
@@ -156,46 +180,7 @@ pages:
 Choose one of the following methods:
 
 <details>
-<summary><strong>Docker compose using provided directory structure (recommended)</strong></summary>
-<br>
-
-Create a new directory called `glance` as well as the template files within it by running:
-
-```bash
-mkdir glance && cd glance && curl -sL https://github.com/glanceapp/docker-compose-template/archive/refs/heads/main.tar.gz | tar -xzf - --strip-components 2
-```
-
-*[click here to view the files that will be created](https://github.com/glanceapp/docker-compose-template/tree/main/root)*
-
-Then, edit the following files as desired:
-* `docker-compose.yml` to configure the port, volumes and other containery things
-* `config/home.yml` to configure the widgets or layout of the home page
-* `config/glance.yml` if you want to change the theme or add more pages
-
-<details>
-<summary>Other files you may want to edit</summary>
-
-* `.env` to configure environment variables that will be available inside configuration files
-* `assets/user.css` to add custom CSS
-</details>
-
-When ready, run:
-
-```bash
-docker compose up -d
-```
-
-If you encounter any issues, you can check the logs by running:
-
-```bash
-docker compose logs
-```
-
-<hr>
-</details>
-
-<details>
-<summary><strong>Docker compose manual</strong></summary>
+<summary><strong>Docker compose (recommended)</strong></summary>
 <br>
 
 Create a `docker-compose.yml` file with the following contents:
@@ -204,7 +189,7 @@ Create a `docker-compose.yml` file with the following contents:
 services:
   glance:
     container_name: glance
-    image: glanceapp/glance
+    image: ghcr.io/j551n-ncloud/glance-reloaded:latest
     restart: unless-stopped
     volumes:
       - ./config:/app/config
@@ -234,43 +219,10 @@ docker logs glance
 </details>
 
 <details>
-<summary><strong>Manual binary installation</strong></summary>
+<summary><strong>Build and run from source</strong></summary>
 <br>
 
-Precompiled binaries are available for Linux, Windows and macOS (x86, x86_64, ARM and ARM64 architectures).
-
-### Linux
-
-Visit the [latest release page](https://github.com/glanceapp/glance/releases/latest) for available binaries. You can place the binary in `/opt/glance/` and have it start with your server via a [systemd service](https://linuxhandbook.com/create-systemd-services/). By default, when running the binary, it will look for a `glance.yml` file in the directory it's placed in. To specify a different path for the config file, use the `--config` option:
-
-```bash
-/opt/glance/glance --config /etc/glance.yml
-```
-
-To grab a starting template for the config file, run:
-
-```bash
-wget https://raw.githubusercontent.com/glanceapp/glance/refs/heads/main/docs/glance.yml
-```
-
-### Windows
-
-Download and extract the executable from the [latest release](https://github.com/glanceapp/glance/releases/latest) (most likely the file called `glance-windows-amd64.zip` if you're on a 64-bit system) and place it in a folder of your choice. Then, create a new text file called `glance.yml` in the same folder and paste the content from [here](https://raw.githubusercontent.com/glanceapp/glance/refs/heads/main/docs/glance.yml) in it. You should then be able to run the executable and access the dashboard by visiting `http://localhost:8080` in your browser.
-
-
-
-<hr>
-</details>
-
-<details>
-<summary><strong>Other</strong></summary>
-<br>
-
-Glance can also be installed through the following 3rd party channels:
-* [Proxmox VE Helper Script](https://community-scripts.org/scripts/glance?id=glance)
-* [NixOS package](https://search.nixos.org/packages?channel=unstable&show=glance)
-* [Hostinger](https://www.hostinger.com/vps/docker/glance)
-* [Coolify.io](https://coolify.io/docs/services/glance/)
+This fork doesn't publish precompiled binaries — only the Docker image above, built by [`.github/workflows/release.yaml`](.github/workflows/release.yaml). To run it directly, see [Building from source](#building-from-source) below.
 
 <hr>
 </details>
@@ -309,12 +261,12 @@ The most common cause of this is having a `pages` key in your `glance.yml` and t
 ## FAQ
 <details>
 <summary><strong>Does the information on the page update automatically?</strong></summary>
-No, a page refresh is required to update the information. Some things do dynamically update where it makes sense, like the clock widget and the relative time showing how long ago something happened.
+Yes. Widgets are re-fetched in the background on their normal cache schedule and pushed live to any open tab (see <a href="#whats-different-in-this-fork">What's different in this fork</a>), so a manual refresh is no longer needed. This can be disabled with <code>server.disable-dynamic-updates</code> or per-page with <code>dynamic-updates: false</code>.
 </details>
 
 <details>
 <summary><strong>How frequently do widgets update?</strong></summary>
-No requests are made periodically in the background, information is only fetched upon loading the page and then cached. The default cache lifetime is different for each widget and can be configured.
+Each widget is re-fetched in the background according to its own cache lifetime, which is different for each widget and can be configured via the <code>cache</code> option.
 </details>
 
 <details>
@@ -345,18 +297,6 @@ Yes, the title of all widgets can be changed by specifying the `title` property 
 # and so on for all widgets...
 ```
 </details>
-
-<br>
-
-## Feature requests
-
-New feature suggestions are always welcome and will be considered, though please keep in mind that some of them may be out of scope for what the project is trying to achieve (or is reasonably capable of). If you have an idea for a new feature and would like to share it, you can do so [here](https://github.com/glanceapp/glance/issues/new?template=feature_request.yml).
-
-Feature requests are tagged with one of the following:
-
-* [Roadmap](https://github.com/glanceapp/glance/labels/roadmap) - will be implemented in a future release
-* [Backlog](https://github.com/glanceapp/glance/labels/backlog) - may be implemented in the future but needs further feedback or interest from the community
-* [Icebox](https://github.com/glanceapp/glance/labels/icebox) - no plans to implement as it doesn't currently align with the project's goals or capabilities, may be revised at a later date
 
 <br>
 
@@ -419,29 +359,14 @@ docker push owner/glance:latest
 
 ## Contributing guidelines
 
-* Before working on a new feature it's preferable to submit a feature request first and state that you'd like to implement it yourself
-* Please don't submit PRs for feature requests that are either in the roadmap<sup>[1]</sup>, backlog<sup>[2]</sup> or icebox<sup>[3]</sup>
-* Use `dev` for the base branch if you're adding new features or fixing bugs, otherwise use `main`
 * Avoid introducing new dependencies
 * Avoid making backwards-incompatible configuration changes
 * Avoid introducing new colors or hard-coding colors, use the standard `primary`, `positive` and `negative`
 * For icons, try to use [heroicons](https://heroicons.com/) where applicable
-* Provide a screenshot of the changes if UI related where possible
 * No `package.json`
-
-<details>
-<summary><strong><sup>[1] [2] [3]</sup></strong></summary>
-
-[1] The feature likely already has work put into it that may conflict with your implementation
-
-[2] The demand, implementation or functionality for this feature is not yet clear
-
-[3] No plans to add this feature for the time being
-
-</details>
 
 <br>
 
-## Thank you
+## Credit
 
-To all the people who were generous enough to [sponsor](https://github.com/sponsors/glanceapp) the project and to everyone who has contributed in any way, be it PRs, submitting issues, helping others in the discussions or Discord server, creating guides and tools or just mentioning Glance on social media. Your support is greatly appreciated and helps keep the project going.
+This is a fork of [glanceapp/glance](https://github.com/glanceapp/glance). All widgets, theming, configuration format, and the overall design are the work of that project's authors and contributors — go there for the general-purpose documentation, community widgets, and to [sponsor](https://github.com/sponsors/glanceapp) the original project. This fork's only addition is the live SSE-based widget updates described above.
