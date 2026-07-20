@@ -781,6 +781,72 @@ async function setupPage() {
             document.body.classList.add("page-columns-transitioned");
         }, 300);
     }
+
+    _initSSE();
 }
+
+// Applies a single widget's freshly rendered HTML to the live DOM using
+// Idiomorph so unrelated nodes (scroll position, open popovers, focus) are
+// left untouched instead of doing a crude innerHTML replacement.
+function _applyWidgetUpdate(widgetId, html) {
+    const target = document.querySelector(`.widget[data-widget-id="${widgetId}"]`);
+    if (!target) return;
+
+    Idiomorph.morph(target, html, { morphStyle: "outerHTML" });
+
+    const liveTarget = document.querySelector(`.widget[data-widget-id="${widgetId}"]`);
+    if (!liveTarget) return;
+
+    setupPopovers();
+    setupCarousels();
+    setupCollapsibleLists();
+    setupCollapsibleGrids();
+    setupGroups();
+    setupMasonries();
+    setupDynamicRelativeTime();
+    setupLazyImages();
+    setupTruncatedElementTitles();
+}
+
+let _sseSource = null;
+let _sseIntentionallyClosed = false;
+
+function _closeSSE() {
+    if (_sseSource) {
+        _sseIntentionallyClosed = true;
+        _sseSource.close();
+        _sseSource = null;
+    }
+}
+
+function _initSSE() {
+    if (!pageData.dynamicUpdateEnabled) {
+        return;
+    }
+
+    const url = `${pageData.baseURL}/api/sse/updates`;
+    _sseSource = new EventSource(url, { withCredentials: true });
+
+    _sseSource.addEventListener("widget-update", (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            _applyWidgetUpdate(data.widgetId, data.html);
+        } catch (e) {
+            console.error("SSE parse error", e);
+        }
+    });
+
+    _sseSource.onerror = () => {
+        if (_sseIntentionallyClosed) {
+            return;
+        }
+
+        if (_sseSource.readyState === EventSource.CLOSED) {
+            window.location.reload();
+        }
+    };
+}
+
+window.addEventListener("beforeunload", _closeSSE);
 
 setupPage();

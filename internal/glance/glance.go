@@ -34,8 +34,13 @@ type application struct {
 
 	parsedManifest []byte
 
-	slugToPage map[string]*page
-	widgetByID map[uint64]widget
+	slugToPage   map[string]*page
+	widgetByID   map[uint64]widget
+	widgetToPage map[uint64]*page
+
+	sseMu                sync.RWMutex
+	sseClients           map[*sseClient]struct{}
+	DynamicUpdateEnabled bool
 
 	RequiresAuth           bool
 	authSecretKey          []byte
@@ -46,11 +51,14 @@ type application struct {
 
 func newApplication(c *config) (*application, error) {
 	app := &application{
-		Version:    buildVersion,
-		CreatedAt:  time.Now(),
-		Config:     *c,
-		slugToPage: make(map[string]*page),
-		widgetByID: make(map[uint64]widget),
+		Version:              buildVersion,
+		CreatedAt:            time.Now(),
+		Config:               *c,
+		slugToPage:           make(map[string]*page),
+		widgetByID:           make(map[uint64]widget),
+		widgetToPage:         make(map[uint64]*page),
+		sseClients:           make(map[*sseClient]struct{}),
+		DynamicUpdateEnabled: !c.Server.DisableDynamicUpdates,
 	}
 	config := &app.Config
 
@@ -175,6 +183,7 @@ func newApplication(c *config) (*application, error) {
 		for i := range page.HeadWidgets {
 			widget := page.HeadWidgets[i]
 			app.widgetByID[widget.GetID()] = widget
+			app.widgetToPage[widget.GetID()] = page
 			widget.setProviders(providers)
 		}
 
@@ -188,6 +197,7 @@ func newApplication(c *config) (*application, error) {
 			for w := range column.Widgets {
 				widget := column.Widgets[w]
 				app.widgetByID[widget.GetID()] = widget
+				app.widgetToPage[widget.GetID()] = page
 				widget.setProviders(providers)
 			}
 		}
@@ -446,6 +456,7 @@ func (a *application) server() (func() error, func() error) {
 	}
 
 	mux.HandleFunc("/api/widgets/{widget}/{path...}", a.handleWidgetRequest)
+	mux.HandleFunc("GET /api/sse/updates", a.handleSSEUpdates)
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
@@ -508,7 +519,11 @@ func (a *application) server() (func() error, func() error) {
 		return nil
 	}
 
+	ctx, cancelCtx := context.WithCancel(context.Background())
+	go a.sseUpdateLoop(ctx)
+
 	stop := func() error {
+		cancelCtx()
 		return server.Close()
 	}
 

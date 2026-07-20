@@ -8,8 +8,10 @@
         /*{{ if .Page }}*/slug: "{{ .Page.Slug }}",/*{{ end }}*/
         baseURL: "{{ .App.Config.Server.BaseURL }}",
         theme: "{{ .Request.Theme.Key }}",
+        dynamicUpdateEnabled: {{ if .Page }}{{ and .App.DynamicUpdateEnabled .Page.DynamicUpdatesEnabled }}{{ else }}{{ .App.DynamicUpdateEnabled }}{{ end }},
     };
     </script>
+    <script src='{{ .App.StaticAssetPath "js/idiomorph.js" }}'></script>
     <title>{{ block "document-title" . }}{{ end }}</title>
     <meta charset="UTF-8">
     <meta name="color-scheme" content="dark">

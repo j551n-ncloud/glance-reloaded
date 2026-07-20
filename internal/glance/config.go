@@ -29,11 +29,12 @@ const (
 
 type config struct {
 	Server struct {
-		Host       string `yaml:"host"`
-		Port       uint16 `yaml:"port"`
-		Proxied    bool   `yaml:"proxied"`
-		AssetsPath string `yaml:"assets-path"`
-		BaseURL    string `yaml:"base-url"`
+		Host                  string `yaml:"host"`
+		Port                  uint16 `yaml:"port"`
+		Proxied               bool   `yaml:"proxied"`
+		AssetsPath            string `yaml:"assets-path"`
+		BaseURL               string `yaml:"base-url"`
+		DisableDynamicUpdates bool   `yaml:"disable-dynamic-updates"`
 	} `yaml:"server"`
 
 	Auth struct {
@@ -77,6 +78,7 @@ type user struct {
 type page struct {
 	Title                  string  `yaml:"name"`
 	Slug                   string  `yaml:"slug"`
+	DynamicUpdates         *bool   `yaml:"dynamic-updates"`
 	Width                  string  `yaml:"width"`
 	DesktopNavigationWidth string  `yaml:"desktop-navigation-width"`
 	ShowMobileHeader       bool    `yaml:"show-mobile-header"`
@@ -89,6 +91,13 @@ type page struct {
 	} `yaml:"columns"`
 	PrimaryColumnIndex int8       `yaml:"-"`
 	mu                 sync.Mutex `yaml:"-"`
+}
+
+// DynamicUpdatesEnabled reports whether this page should receive live widget
+// updates over SSE. Defaults to true; set `dynamic-updates: false` on a page
+// to opt it out (e.g. pages with widgets whose content rarely changes).
+func (p *page) DynamicUpdatesEnabled() bool {
+	return p.DynamicUpdates == nil || *p.DynamicUpdates
 }
 
 func newConfigFromYAML(contents []byte) (*config, error) {
