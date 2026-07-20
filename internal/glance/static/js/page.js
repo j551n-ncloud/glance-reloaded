@@ -21,6 +21,10 @@ function setupCarousels() {
 
     for (let i = 0; i < carouselElements.length; i++) {
         const carousel = carouselElements[i];
+
+        if (carousel.dataset.initialized) continue;
+        carousel.dataset.initialized = "true";
+
         carousel.classList.add("show-right-cutoff");
         const itemsContainer = carousel.getElementsByClassName("carousel-items-container")[0];
 
@@ -206,19 +210,25 @@ function setupSearchBoxes() {
     }
 }
 
-function setupDynamicRelativeTime() {
-    const elements = document.querySelectorAll("[data-dynamic-relative-time]");
-    const updateInterval = 60 * 1000;
-    let lastUpdateTime = Date.now();
+const dynamicRelativeTimeUpdateInterval = 60 * 1000;
+let dynamicRelativeTimeInitialized = false;
+let dynamicRelativeTimeLastUpdate = Date.now();
 
-    updateRelativeTimeForElements(elements);
+function setupDynamicRelativeTime() {
+    // Always do an immediate pass over whatever's in the DOM right now —
+    // widgets updated live via SSE bring in new elements that a stale,
+    // closed-over NodeList from the first call would never see.
+    updateRelativeTimeForElements(document.querySelectorAll("[data-dynamic-relative-time]"));
+
+    if (dynamicRelativeTimeInitialized) return;
+    dynamicRelativeTimeInitialized = true;
 
     const updateElementsAndTimestamp = () => {
-        updateRelativeTimeForElements(elements);
-        lastUpdateTime = Date.now();
+        updateRelativeTimeForElements(document.querySelectorAll("[data-dynamic-relative-time]"));
+        dynamicRelativeTimeLastUpdate = Date.now();
     };
 
-    const scheduleRepeatingUpdate = () => setInterval(updateElementsAndTimestamp, updateInterval);
+    const scheduleRepeatingUpdate = () => setInterval(updateElementsAndTimestamp, dynamicRelativeTimeUpdateInterval);
 
     if (document.hidden === undefined) {
         scheduleRepeatingUpdate();
@@ -233,9 +243,9 @@ function setupDynamicRelativeTime() {
             return;
         }
 
-        const delta = Date.now() - lastUpdateTime;
+        const delta = Date.now() - dynamicRelativeTimeLastUpdate;
 
-        if (delta >= updateInterval) {
+        if (delta >= dynamicRelativeTimeUpdateInterval) {
             updateElementsAndTimestamp();
             timeout = scheduleRepeatingUpdate();
             return;
@@ -244,9 +254,11 @@ function setupDynamicRelativeTime() {
         timeout = setTimeout(() => {
             updateElementsAndTimestamp();
             timeout = scheduleRepeatingUpdate();
-        }, updateInterval - delta);
+        }, dynamicRelativeTimeUpdateInterval - delta);
     });
 }
+
+const _initializedGroupHeaders = new WeakSet();
 
 function setupGroups() {
     const groups = document.getElementsByClassName("widget-type-group");
@@ -257,54 +269,90 @@ function setupGroups() {
 
     for (let g = 0; g < groups.length; g++) {
         const group = groups[g];
-        const titles = group.getElementsByClassName("widget-header")[0].children;
+
+        const headerEl = group.getElementsByClassName("widget-header")[0];
+        if (!headerEl) continue;
+
+        const titles = headerEl.children;
         const tabs = group.getElementsByClassName("widget-group-contents")[0].children;
-        let current = 0;
 
-        for (let t = 0; t < titles.length; t++) {
-            const title = titles[t];
+        // A whole-group live SSE update replaces this element's entire
+        // subtree (see the comment on selfAndDescendants above) and strips
+        // any data-* attribute the morph doesn't know about, so the
+        // currently selected tab is captured beforehand (_applyWidgetUpdate)
+        // and handed back via this same attribute — read it here to pick up
+        // where the user left off instead of resetting to the first tab.
+        let current = parseInt(group.dataset.currentTab ?? "0", 10);
+        if (Number.isNaN(current) || current < 0 || current >= titles.length) {
+            current = 0;
+        }
 
-            if (title.dataset.titleUrl !== undefined) {
-                title.addEventListener("mousedown", (event) => {
-                    if (event.button != 1) {
+        const setCurrentTab = (nextCurrent) => {
+            group.dataset.currentTab = String(nextCurrent);
+
+            for (let i = 0; i < titles.length; i++) {
+                titles[i].classList.remove("widget-group-title-current");
+                titles[i].setAttribute("aria-selected", "false");
+                tabs[i].classList.remove("widget-group-content-current");
+                tabs[i].setAttribute("aria-hidden", "true");
+            }
+
+            const title = titles[nextCurrent];
+            const tab = tabs[nextCurrent];
+            if (!title || !tab) return;
+
+            title.classList.add("widget-group-title-current");
+            title.setAttribute("aria-selected", "true");
+            tab.classList.add("widget-group-content-current");
+            // Reset in case a prior live update forced this off below —
+            // otherwise a genuine user click would stay silently un-animated.
+            tab.style.animation = "";
+            tab.setAttribute("aria-hidden", "false");
+        };
+
+        // Every call re-closes over this group's *current* titles/tabs
+        // (freshly queried above), so stash it where the listeners attached
+        // below — which may be surviving from an earlier call whose own
+        // titles/tabs reference DOM a later live update replaced — can always
+        // reach the version that's actually valid right now.
+        group._glanceSetCurrentTab = setCurrentTab;
+
+        if (!_initializedGroupHeaders.has(headerEl)) {
+            _initializedGroupHeaders.add(headerEl);
+
+            for (let t = 0; t < titles.length; t++) {
+                const title = titles[t];
+
+                if (title.dataset.titleUrl !== undefined) {
+                    title.addEventListener("mousedown", (event) => {
+                        if (event.button != 1) {
+                            return;
+                        }
+
+                        openURLInNewTab(title.dataset.titleUrl, false);
+                        event.preventDefault();
+                    });
+                }
+
+                title.addEventListener("click", () => {
+                    const activeCurrent = parseInt(group.dataset.currentTab ?? "0", 10);
+
+                    if (t == activeCurrent) {
+                        if (title.dataset.titleUrl !== undefined) {
+                            openURLInNewTab(title.dataset.titleUrl);
+                        }
+
                         return;
                     }
 
-                    openURLInNewTab(title.dataset.titleUrl, false);
-                    event.preventDefault();
+                    const liveTabs = group.getElementsByClassName("widget-group-contents")[0].children;
+                    liveTabs[t].dataset.direction = activeCurrent < t ? "right" : "left";
+                    group._glanceSetCurrentTab(t);
                 });
             }
-
-            title.addEventListener("click", () => {
-                if (t == current) {
-                    if (title.dataset.titleUrl !== undefined) {
-                        openURLInNewTab(title.dataset.titleUrl);
-                    }
-
-                    return;
-                }
-
-                for (let i = 0; i < titles.length; i++) {
-                    titles[i].classList.remove("widget-group-title-current");
-                    titles[i].setAttribute("aria-selected", "false");
-                    tabs[i].classList.remove("widget-group-content-current");
-                    tabs[i].setAttribute("aria-hidden", "true");
-                }
-
-                if (current < t) {
-                    tabs[t].dataset.direction = "right";
-                } else {
-                    tabs[t].dataset.direction = "left";
-                }
-
-                current = t;
-
-                title.classList.add("widget-group-title-current");
-                title.setAttribute("aria-selected", "true");
-                tabs[t].classList.add("widget-group-content-current");
-                tabs[t].setAttribute("aria-hidden", "false");
-            });
         }
+
+        setCurrentTab(current);
     }
 }
 
@@ -350,8 +398,14 @@ function attachExpandToggleButton(collapsibleContainer) {
     const textNode = document.createTextNode(showMoreText);
     button.classList.add("expand-toggle-button");
     button.append(textNode, icon);
-    button.addEventListener("click", () => {
-        expanded = !expanded;
+
+    // Exposed so a live SSE update can restore whether this was expanded
+    // before the widget's HTML got replaced, without synthesizing a click
+    // (which would also run the scroll-position adjustment below and jump
+    // the page out from under someone who isn't even looking at it).
+    const setExpandedState = (nextExpanded, options = {}) => {
+        const skipScrollAdjustment = options.skipScrollAdjustment === true;
+        expanded = nextExpanded;
 
         if (expanded) {
             collapsibleContainer.classList.add("container-expanded");
@@ -360,11 +414,15 @@ function attachExpandToggleButton(collapsibleContainer) {
             return;
         }
 
-        const topBefore = button.getClientRects()[0].top;
+        const topBefore = skipScrollAdjustment ? 0 : button.getClientRects()[0].top;
 
         collapsibleContainer.classList.remove("container-expanded");
         button.classList.remove("container-expanded");
         textNode.nodeValue = showMoreText;
+
+        if (skipScrollAdjustment) {
+            return;
+        }
 
         const topAfter = button.getClientRects()[0].top;
 
@@ -375,7 +433,10 @@ function attachExpandToggleButton(collapsibleContainer) {
             top: topAfter - topBefore,
             behavior: "instant"
         });
-    });
+    };
+    button.setExpandedState = setExpandedState;
+
+    button.addEventListener("click", () => setExpandedState(!expanded));
 
     collapsibleContainer.after(button);
 
@@ -785,6 +846,72 @@ async function setupPage() {
     _initSSE();
 }
 
+// Idiomorph strips any data-* attributes and injected elements (toggle
+// buttons, etc.) that only exist because JS added them client-side, since
+// none of that is present in the server-rendered HTML it's morphing against.
+// These capture/restore pairs read state out of the DOM before the morph and
+// hand it back to the relevant setup function afterwards, so a live update
+// doesn't visibly reset something the user had open.
+//
+// A widget-group's own root element carries the class an SSE update targets
+// are matched against too — unlike a group's individually-addressable child
+// widgets, the group as a whole is a single opaque unit here (see the
+// widgetToPage registration in glance.go), so `element` itself, not just its
+// descendants, needs to be checked.
+function selfAndDescendants(element, selector) {
+    const descendants = [...element.querySelectorAll(selector)];
+    return element.matches(selector) ? [element, ...descendants] : descendants;
+}
+
+function getCollapsibleContainerStates(element) {
+    const allContainers = selfAndDescendants(element, ".collapsible-container");
+    return allContainers.map((container) => container.classList.contains("container-expanded"));
+}
+
+function restoreCollapsibleContainerStates(element, containerStates) {
+    if (!containerStates.length) return;
+
+    const allContainers = selfAndDescendants(element, ".collapsible-container");
+
+    for (let index = 0; index < containerStates.length; index++) {
+        const container = allContainers[index];
+        if (!container) continue;
+
+        const button = container.nextElementSibling;
+        if (button && button.classList.contains("expand-toggle-button")) {
+            const shouldBeExpanded = containerStates[index];
+            const isExpanded = container.classList.contains("container-expanded");
+
+            if (isExpanded === shouldBeExpanded) {
+                continue;
+            }
+
+            button.setExpandedState(shouldBeExpanded, { skipScrollAdjustment: true });
+        }
+    }
+}
+
+function getGroupTabStates(element) {
+    const groups = selfAndDescendants(element, ".widget-type-group");
+    return groups.map((group) => {
+        const currentTab = parseInt(group.dataset.currentTab ?? "0", 10);
+        return Number.isNaN(currentTab) ? 0 : currentTab;
+    });
+}
+
+function restoreGroupTabStates(element, groupTabStates) {
+    if (!groupTabStates.length) return;
+
+    const groups = selfAndDescendants(element, ".widget-type-group");
+
+    for (let index = 0; index < groupTabStates.length; index++) {
+        const group = groups[index];
+        if (!group) continue;
+
+        group.dataset.currentTab = String(groupTabStates[index]);
+    }
+}
+
 // Applies a single widget's freshly rendered HTML to the live DOM using
 // Idiomorph so unrelated nodes (scroll position, open popovers, focus) are
 // left untouched instead of doing a crude innerHTML replacement.
@@ -792,7 +919,23 @@ function _applyWidgetUpdate(widgetId, html) {
     const target = document.querySelector(`.widget[data-widget-id="${widgetId}"]`);
     if (!target) return;
 
-    Idiomorph.morph(target, html, { morphStyle: "outerHTML" });
+    const collapsibleContainerStates = getCollapsibleContainerStates(target);
+    const groupTabStates = getGroupTabStates(target);
+
+    // Idiomorph may resize the widget while it's above the viewport, which
+    // would otherwise drag the page's scroll position along with it (the
+    // browser's native scroll anchoring "helpfully" compensates for content
+    // size changes above the fold) even though nothing the user is looking
+    // at moved.
+    const htmlElem = document.documentElement;
+    const prevAnchor = htmlElem.style.overflowAnchor;
+    htmlElem.style.overflowAnchor = "none";
+
+    try {
+        Idiomorph.morph(target, html, { morphStyle: "outerHTML" });
+    } finally {
+        htmlElem.style.overflowAnchor = prevAnchor;
+    }
 
     const liveTarget = document.querySelector(`.widget[data-widget-id="${widgetId}"]`);
     if (!liveTarget) return;
@@ -801,7 +944,18 @@ function _applyWidgetUpdate(widgetId, html) {
     setupCarousels();
     setupCollapsibleLists();
     setupCollapsibleGrids();
+    restoreCollapsibleContainerStates(liveTarget, collapsibleContainerStates);
+    // setupGroups() reads dataset.currentTab once, at setup time, to decide
+    // which tab to display — it has to be restored before that call, not
+    // after, or it'll already have defaulted to the first tab by then.
+    restoreGroupTabStates(liveTarget, groupTabStates);
     setupGroups();
+    // A background update shouldn't replay the tab slide-in animation as if
+    // the user had just clicked it.
+    const groupContents = liveTarget.querySelectorAll(".widget-group-content");
+    for (let i = 0; i < groupContents.length; i++) {
+        groupContents[i].style.animation = "none";
+    }
     setupMasonries();
     setupDynamicRelativeTime();
     setupLazyImages();
