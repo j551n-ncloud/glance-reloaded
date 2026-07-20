@@ -965,7 +965,12 @@ function _applyWidgetUpdate(widgetId, html) {
 let _sseSource = null;
 let _sseIntentionallyClosed = false;
 let _sseRetryCount = 0;
-const _sseMaxRetries = 5;
+// After enough consecutive hard failures, stop trying rather than retry
+// forever — but never escalate to a page reload over it. Losing live
+// updates and needing a manual refresh to pick back up is a strictly better
+// outcome than the page yanking itself out from under whoever's looking at
+// it, no matter what's actually wrong with the connection.
+const _sseGiveUpAfterRetries = 20;
 
 function _closeSSE() {
     if (_sseSource) {
@@ -1008,9 +1013,8 @@ function _connectSSE() {
         // A transient network error keeps the browser retrying on its own
         // (readyState stays CONNECTING) — we only land here once it's given
         // up entirely, which in practice means a reconnect got back a hard
-        // failure (e.g. an expired session). Retry a few times ourselves
-        // with backoff first; only fall back to a full page reload if it's
-        // still failing after that, instead of reloading on the first blip.
+        // failure (e.g. an expired session, or a proxy/CDN returning its own
+        // error response instead of just dropping the connection).
         if (_sseSource.readyState !== EventSource.CLOSED) {
             return;
         }
@@ -1018,8 +1022,8 @@ function _connectSSE() {
         _sseSource.close();
         _sseRetryCount++;
 
-        if (_sseRetryCount > _sseMaxRetries) {
-            window.location.reload();
+        if (_sseRetryCount > _sseGiveUpAfterRetries) {
+            console.error("Live widget updates disconnected and could not reconnect; reload the page to restore them.");
             return;
         }
 
